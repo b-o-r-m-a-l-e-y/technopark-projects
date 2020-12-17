@@ -32,11 +32,15 @@ import time
 from threading import Timer
 import numpy as np
 import matplotlib.pyplot as plt
+import keyboard
 
 
 import cflib.crtp  # noqa
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.log import LogConfig
+
+from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
+from cflib.crazyflie.syncLogger import SyncLogger
 
 # Only output errors from the logging framework
 logging.basicConfig(level=logging.ERROR)
@@ -132,28 +136,119 @@ class LoggingExample:
         self.is_connected = False
 
 
+def wait_for_position_estimator(scf):
+    print('Waiting for estimator to find position...')
+
+    log_config = LogConfig(name='Kalman Variance', period_in_ms=500)
+    log_config.add_variable('kalman.varPX', 'float')
+    log_config.add_variable('kalman.varPY', 'float')
+    log_config.add_variable('kalman.varPZ', 'float')
+
+    var_y_history = [1000] * 10
+    var_x_history = [1000] * 10
+    var_z_history = [1000] * 10
+
+    threshold = 0.001
+
+    with SyncLogger(scf, log_config) as logger:
+        for log_entry in logger:
+            data = log_entry[1]
+
+            var_x_history.append(data['kalman.varPX'])
+            var_x_history.pop(0)
+            var_y_history.append(data['kalman.varPY'])
+            var_y_history.pop(0)
+            var_z_history.append(data['kalman.varPZ'])
+            var_z_history.pop(0)
+
+            min_x = min(var_x_history)
+            max_x = max(var_x_history)
+            min_y = min(var_y_history)
+            max_y = max(var_y_history)
+            min_z = min(var_z_history)
+            max_z = max(var_z_history)
+
+            # print("{} {} {}".
+            #       format(max_x - min_x, max_y - min_y, max_z - min_z))
+
+            if (max_x - min_x) < threshold and (
+                    max_y - min_y) < threshold and (
+                    max_z - min_z) < threshold:
+                break
+
+
+def reset_estimator(scf):
+    cf = scf.cf
+    cf.param.set_value('kalman.resetEstimation', '1')
+    time.sleep(0.1)
+    cf.param.set_value('kalman.resetEstimation', '0')
+
+    wait_for_position_estimator(cf)
+
+
+def position_callback(timestamp, data, logconf):
+    x = data['kalman.stateX']
+    y = data['kalman.stateY']
+    z = data['kalman.stateZ']
+    print('pos: ({}, {}, {})'.format(x, y, z))
+
+
+def start_position_printing(scf):
+    log_conf = LogConfig(name='Position', period_in_ms=500)
+    log_conf.add_variable('kalman.stateX', 'float')
+    log_conf.add_variable('kalman.stateY', 'float')
+    log_conf.add_variable('kalman.stateZ', 'float')
+
+    scf.cf.log.add_config(log_conf)
+    log_conf.data_received_cb.add_callback(position_callback)
+    log_conf.start()
+
+
+def run_sequence(scf, sequence):
+    cf = scf.cf
+
+    for position in sequence:
+        print('Setting position {}'.format(position))
+        for i in range(50):
+            cf.commander.send_position_setpoint(position[0],
+                                                position[1],
+                                                position[2],
+                                                position[3])
+            time.sleep(0.1)
+
+    cf.commander.send_stop_setpoint()
+    # Make sure that the last packet leaves before the link is closed
+    # since the message queue is not flushed before closing
+    time.sleep(0.1)
+
+
 if __name__ == '__main__':
     # Initialize the low-level drivers (don't list the debug drivers)
-    '''
+    # --------- Часть кода, отечающая за позиционирование квадрокоптера в определённой точке пространства -------
     cflib.crtp.init_drivers(enable_debug_driver=False)
     # Scan for Crazyflies and use the first one found
     uri = 'radio://0/80/2M/E7E7E7E7E5'
     
-    le = LoggingExample(uri)
-    # The Crazyflie lib doesn't contain anything to keep the application alive,
-    # so this is where your application should do something. In our case we
-    # are just waiting until we are disconnected.
-    while le.is_connected:
-        time.sleep(1)
+    #Точка, куда позиционируем квадрокоптер
+    point = [(1.5, 0.5, 1.0, 0)]
+    
+    with SyncCrazyflie(uri, cf=Crazyflie(rw_cache='./cache')) as scf:
+        le = LoggingExample(uri)
+        while (keyboard.is_pressed('q')):
+            reset_estimator(scf)
+            # start_position_printing(scf)
+            run_sequence(scf, point)
+            time.sleep(1)
 
+    # -------- Часть кода, ответственная за статистическую обработку данных ---------
+    #Выводим массив для последующей обработки
+    #TODO оформить вывод в файл построчно
     print(le.dataX)
     print(le.dataY)
-    '''
+    print(le.dataZ)
+    
     a = [-4.18819522857666, -4.188503265380859, -4.18867301940918, -4.18831205368042, -4.188274383544922, -4.190276145935059, -4.190556049346924, -4.19222354888916, -4.193119049072266, -4.192699909210205, -4.1937384605407715, -4.195711135864258, -4.1934075355529785, -4.197160720825195, -4.200630187988281, -4.205377101898193, -4.204904079437256, -4.205684661865234, -4.210937976837158, -4.208333492279053, -4.207971096038818, -4.210206031799316, -4.208774566650391, -4.209221839904785, -4.209522724151611, -4.205291748046875, -4.211694717407227, -4.211846828460693, -4.209316730499268, -4.216280460357666, -4.217368125915527, -4.218880653381348, -4.214470386505127, -4.215321063995361, -4.223378658294678, -4.228857517242432, -4.2234110832214355, -4.229701519012451, -4.233022689819336, -4.23349142074585, -4.235903739929199, -4.236464023590088, -4.239033222198486, -4.2393598556518555, -4.242741584777832, 
 -4.245118141174316, -4.24627161026001, -4.248228073120117, -4.2429890632629395, -4.248841285705566, -4.25048303604126, -4.250890731811523, -4.252286911010742, -4.255359649658203, -4.252754211425781, -4.256353855133057, -4.252493381500244, -4.251247406005859, -4.25228214263916, -4.250643730163574, -4.254970073699951, -4.255213260650635, -4.254988193511963, -4.2521162033081055, -4.253142833709717, -4.2554731369018555, -4.25645637512207, -4.258654594421387, -4.25919771194458, -4.25652551651001, -4.260899543762207, -4.26065731048584, -4.26123571395874, -4.271770477294922, -4.262786388397217, -4.255111217498779, -4.253579139709473, -4.252880573272705, -4.2521653175354, -4.254368305206299, -4.255382061004639, -4.257903099060059, -4.256897926330566, -4.2533721923828125, -4.251129627227783, -4.25206995010376, -4.252162933349609, -4.254453659057617, -4.257375717163086, -4.248505115509033, -4.256804943084717, -4.266366958618164, -4.2694091796875, -4.273106575012207, -4.276010036468506, -4.2797322273254395, -4.278544902801514, -4.284336566925049, -4.288623332977295]
 
+    #Подсчет дисперсии
     print(np.sqrt(np.var(a)))
-    
-    plt.plot([1, 2, 3, 4])
-    plt.ylabel('some numbers')
-    plt.show()
