@@ -9,6 +9,8 @@ import cflib.crtp  # noqa
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.log import LogConfig
 
+import keyboard
+
 # Only output errors from the logging framework
 logging.basicConfig(level=logging.ERROR)
 
@@ -77,7 +79,7 @@ class LoggingExample:
             print('Could not add Stabilizer log config, bad configuration.')
 
         # Start a timer to disconnect in 10s
-        t = Timer(5, self._cf.close_link)
+        t = Timer(20, self._cf.close_link)
         t.start()
 
     def _stab_log_error(self, logconf, msg):
@@ -201,27 +203,32 @@ def run_sequence(scf, sequence):
     # since the message queue is not flushed before closing
     time.sleep(0.1)
 
+
 if __name__ == '__main__':
     # Initialize the low-level drivers (don't list the debug drivers)
     cflib.crtp.init_drivers(enable_debug_driver=False)
     # Scan for Crazyflies and use the first one found
     uriLandingPlace = 'radio://0/80/2M/E7E7E7E7E5'
     uriQuad = 'radio://0/80/2M/E7E7E7E7E8'
-    
-    le = LoggingExample(uriLandingPlace)
-    # The Crazyflie lib doesn't contain anything to keep the application alive,
-    # so this is where your application should do something. In our case we
-    # are just waiting until we are disconnected.
-    scf = SyncCrazyflie(uriQuad, cf=Crazyflie(rw_cache='./cache'))
-    reset_estimator(scf)
-    #start_position_printing(scf)
-    while le.is_connected:
-        run_sequence(scf, [(le.nextPosX,le.nextPosY,0.5,0)])
-        time.sleep(1)
 
-'''
+    #Соединение с квадрокоптером, который будет лететь за платформой
     with SyncCrazyflie(uriQuad, cf=Crazyflie(rw_cache='./cache')) as scf:
+        #Ожидаем пока его местоположение станет достаточно точным
         reset_estimator(scf)
         start_position_printing(scf)
-        run_sequence(scf, [(le.posX,le.posY,0.5,0)])
-        '''
+
+        #Логгируем данные с колесной платформы
+        le = LoggingExample(uriLandingPlace)
+
+        while le.is_connected:
+                #Выводим местоположение квадрокоптера
+                start_position_printing(scf)
+                #Посылаем квадрокоптер в заданную точку (предсказанную точку появления платформы)
+                run_sequence(scf, [(le.nextPosX,le.nextPosY,0.5,0)])
+                #Посадка
+                if keyboard.is_pressed('q'):
+                    print("landing")
+                    scf.cf.high_level_commander.land()
+                    break
+                #Засыпаем до следующего прихода данных
+                time.sleep(le.period_in_ms*2)
