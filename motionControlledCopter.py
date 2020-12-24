@@ -57,16 +57,13 @@ class LoggingExample:
         self._cf.disconnected.add_callback(self._disconnected)
         self._cf.connection_failed.add_callback(self._connection_failed)
         self._cf.connection_lost.add_callback(self._connection_lost)
-        self._dataPrevAx = 0
-        self._dataPrevAy = 0
-        self._dataPrevAz = 0
+        self._dataPrevX = 0
+        self._dataPrevY = 0
+        self._dataPrevZ = 0
 
-        self.flyXLeft = 0
-        self.flyXRight = 0
-        self.flyYForward = 0
-        self.flyYBack = 0
-        self.flyZUp = 0
-        self.flyZDown = 0
+        self.deltaX = 0
+        self.deltaY = 0
+        self.deltaZ = 0
 
         print('Connecting to %s' % link_uri)
 
@@ -82,10 +79,10 @@ class LoggingExample:
         print('Connected to %s' % link_uri)
 
         # The definition of the logconfig can be made before connecting
-        self._lg_stab = LogConfig(name='Accel', period_in_ms=400)
-        self._lg_stab.add_variable('stateEstimate.ax', 'float')
-        self._lg_stab.add_variable('stateEstimate.ay', 'float')
-        self._lg_stab.add_variable('stateEstimate.az', 'float')
+        self._lg_stab = LogConfig(name='Accel', period_in_ms=300)
+        self._lg_stab.add_variable('stateEstimate.x', 'float')
+        self._lg_stab.add_variable('stateEstimate.y', 'float')
+        self._lg_stab.add_variable('stateEstimate.z', 'float')
 
         # Adding the configuration cannot be done until a Crazyflie is
         # connected, since we need to check that the variables we
@@ -105,7 +102,7 @@ class LoggingExample:
             print('Could not add Stabilizer log config, bad configuration.')
 
         # Start a timer to disconnect in 10s
-        t = Timer(20, self._cf.close_link)
+        t = Timer(60, self._cf.close_link)
         t.start()
 
     def _stab_log_error(self, logconf, msg):
@@ -116,37 +113,17 @@ class LoggingExample:
         """Callback from a the log API when data arrives"""
         #print('[%d][%s]: %s' % (timestamp, logconf.name, data))
        # print(data)
-        ax = data['stateEstimate.ax']
-        ay = data['stateEstimate.ay']
-        az = data['stateEstimate.az']
-        threshold = 1.0
-        if (abs(ax-self._dataPrevAx)>threshold and ax>0 and self._dataPrevAx):
-            print("Зафиксировано движение Вправо по оси Х")
-            self.flyXRight = 1
-            return
-        if (abs(ax-self._dataPrevAx)<threshold and ax<0 and self._dataPrevAx):
-            print("Зафиксировано движение Влево по оси Х")
-            self.flyXLeft = 1
-            return
-        self._dataPrevAx = ax
-        if (abs(ay-self._dataPrevAy)>threshold and ay>0 and self._dataPrevAy):
-            print("Зафиксировано движение Вперёд по оси y")
-            self.flyYForward = 1
-            return
-        if (abs(ay-self._dataPrevAy)<threshold and ay<0 and self._dataPrevAy):
-            print("Зафиксировано движение Назад по оси y")
-            self.flyYBack = 1
-            return
-        self._dataPrevAy = ay
-        if (abs(az-self._dataPrevAz)>threshold and az>0 and self._dataPrevAz):
-            print("Зафиксировано движение Вверх по оси z")
-            self.flyZUp = 1
-            return
-        if (abs(az-self._dataPrevAz)<threshold and az<0 and self._dataPrevAz):
-            print("Зафиксировано движение Вниз по оси z")
-            self.flyZDown = 1
-            return
-        self._dataPrevAz = ax
+        x = data['stateEstimate.x']
+        y = data['stateEstimate.y']
+        z = data['stateEstimate.z']
+        self.deltaX = round(x - self._dataPrevX,1)
+        self.deltaY = round(y - self._dataPrevY,1)
+        self.deltaZ = round(z - self._dataPrevZ,1)
+        self._dataPrevX = x
+        self._dataPrevY = y
+        self._dataPrevZ = z
+        #print(self.deltaX,self.deltaY,self.deltaZ)
+
 
     def _connection_failed(self, link_uri, msg):
         """Callback when connection initial connection fails (i.e no Crazyflie
@@ -169,34 +146,22 @@ if __name__ == '__main__':
     # Initialize the low-level drivers (don't list the debug drivers)
     cflib.crtp.init_drivers(enable_debug_driver=False)
     # Scan for Crazyflies and use the first one found
-    uri = 'radio://0/80/2M/E7E7E7E7F2'
-    URIFlying = 'radio://0/80/2M/E7E7E7E7E6'
-    
-    le = LoggingExample(uri)
-    # The Crazyflie lib doesn't contain anything to keep the application alive,
-    # so this is where your application should do something. In our case we
-    # are just waiting until we are disconnected.
+    uriControl = 'radio://0/80/2M/E7E7E7E7E3'
+    URIFlying = 'radio://0/80/2M/E7E7E7E7E9'
+
     with SyncCrazyflie(URIFlying, cf=Crazyflie(rw_cache='./cache')) as scf:
+        le = LoggingExample(uriControl)
         # We take off when the commander is created
         with MotionCommander(scf) as mc:
-            time.sleep(1)
-            if (le.flyXLeft == 1):
-                mc.left(0.2)
-                le.flyXLeft = 0
-            if (le.flyXRight == 1):
-                mc.right(0.2)
-                le.flyXRight = 0
-            if (le.flyYForward == 1):
-                mc.forward(0.2)
-                le.flyYForward = 0
-            if (le.flyYBack == 1):
-                mc.back(0.2)
-                le.flyYBack= 0
-            if (le.flyZUp == 1):
-                mc.up(0.2)
-                le.flyZUp= 0
-            if (le.flyZDown == 1):
-                mc.down(0.2)
-                le.flyZDown= 0
-    #while le.is_connected:
-        #time.sleep(1)
+            while(le.is_connected):
+                print(le.deltaX,le.deltaY,le.deltaZ)
+                threshold = 0.2
+                if (le.deltaX>=threshold or le.deltaX<=-threshold):
+                    mc.move_distance(le.deltaX,0,0, 0.4)
+                    print("moving X")
+                if (le.deltaY>=threshold or le.deltaY<=-threshold):
+                    mc.move_distance(0,le.deltaY,0, 0.4)
+                    print("moving Y")
+                if (le.deltaZ>=threshold or le.deltaZ<=-threshold):
+                    mc.move_distance(0,0,le.deltaZ, 0.4)
+                    print("moving Z")
