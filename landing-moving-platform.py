@@ -42,7 +42,7 @@ class LoggingExample:
         self.posY = 0
         self.nextPosX = 0
         self.nextPosY = 0
-        self.period_in_ms = 100
+        self.period_in_ms = 400
 
         print('Connecting to %s' % link_uri)
 
@@ -89,7 +89,6 @@ class LoggingExample:
     def _stab_log_data(self, timestamp, data, logconf):
         """Callback from a the log API when data arrives"""
         #print('[%d][%s]: %s' % (timestamp, logconf.name, data))
-        print(data)
         self.posX = data['stateEstimate.x']
         self.posY = data['stateEstimate.y']
         self.speedX = (self.posX - self.prevPosX)/self.period_in_ms
@@ -207,28 +206,31 @@ def run_sequence(scf, sequence):
 if __name__ == '__main__':
     # Initialize the low-level drivers (don't list the debug drivers)
     cflib.crtp.init_drivers(enable_debug_driver=False)
-    # Scan for Crazyflies and use the first one found
-    uriLandingPlace = 'radio://0/80/2M/E7E7E7E7E5'
-    uriQuad = 'radio://0/80/2M/E7E7E7E7E8'
+
+    uriLandingPlace = 'radio://0/80/2M/E7E7E7E7E7'
+    uriQuad = 'radio://0/80/2M/E7E7E7E7E3' #Нужно использовать без Flow Deck, так быстрее происходит захват точки
 
     #Соединение с квадрокоптером, который будет лететь за платформой
     with SyncCrazyflie(uriQuad, cf=Crazyflie(rw_cache='./cache')) as scf:
         #Ожидаем пока его местоположение станет достаточно точным
         reset_estimator(scf)
-        start_position_printing(scf)
-
+        print("Estimator was resetted")
         #Логгируем данные с колесной платформы
         le = LoggingExample(uriLandingPlace)
-
+        time.sleep(1) #Избегаем нулевых данных о предположительном местоположении
         while le.is_connected:
-                #Выводим местоположение квадрокоптера
-                start_position_printing(scf)
+                print("Next X: ", le.nextPosX, "  Next Y: ", le.nextPosY)
                 #Посылаем квадрокоптер в заданную точку (предсказанную точку появления платформы)
-                run_sequence(scf, [(le.nextPosX,le.nextPosY,0.5,0)])
+                if keyboard.is_pressed('p'):
+                    print("send position")
+                    x = le.nextPosX
+                    y = le.nextPosY
+                    for i in range(10):
+                        scf.cf.commander.send_position_setpoint(x,y,0.5,0.0)
+                        time.sleep(0.1)
+                    break
                 #Посадка
                 if keyboard.is_pressed('q'):
                     print("landing")
-                    scf.cf.high_level_commander.land()
                     break
-                #Засыпаем до следующего прихода данных
-                time.sleep(le.period_in_ms*2)
+                time.sleep(0.1)
